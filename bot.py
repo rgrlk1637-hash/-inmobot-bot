@@ -2,7 +2,7 @@ import os, re, json, asyncio, logging
 from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 load_dotenv()
@@ -26,13 +26,11 @@ def scrape_property(url: str):
         title = og("og:title") or (soup.title.string if soup.title else "Propiedad")
         desc = og("og:description") or ""
         image = og("og:image") or ""
-        # buscar todas las og:image
         images = [m["content"] for m in soup.find_all("meta", property="og:image") if m.get("content")]
         if not images and image:
             images = [image]
         
-        # precio simple con regex
-        price_match = re.search(r"(USD|U\$S|\$)\s?[\d\.\,]+", r.text)
+        price_match = re.search(r"(USD|U\$S|\$|Gs\.)\s?[\d\.,]+", r.text)
         price = price_match.group(0) if price_match else ""
 
         return {
@@ -48,24 +46,20 @@ def scrape_property(url: str):
 # --- HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏠 *InmoBot Genérico*\n\n"
-        "1. Conectá tu Facebook/IG con /conectar\n"
-        "2. Reenviame 1 o 20 links de propiedades (uno por línea)\n"
-        "3. Te dejo todo en borradores y publicas aviso por aviso donde quieras: FB Feed, IG Feed, Reel o Historia.\n\n"
-        "Es multi-usuario, cada uno publica en SU cuenta.",
-        parse_mode="Markdown"
+        "🏠 InmoBot Generico\n\n"
+        "1. Conecta tu Facebook/IG con /conectar\n"
+        "2. Reenvíame 1 o varios links de propiedades (uno por línea)\n"
+        "3. Te genero el copy y las fotos. Revisa todo en el Dashboard y publica.\n\n"
+        f"Dashboard: {APP_URL}/dashboard?tid={update.effective_user.id}"
     )
 
 async def conectar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
-    # Link firmado para vincular Telegram ID con FB OAuth
     link = f"{APP_URL}/auth/login?telegram_id={telegram_id}"
-    kb = [[InlineKeyboardButton("🔗 Conectar Facebook + Instagram", url=link)]]
     await update.message.reply_text(
-        "Para que pueda publicar en TU cuenta, conectala una sola vez:\n\n"
+        "Para publicar en tu cuenta de Facebook e Instagram, conectala una sola vez:\n\n"
         f"{link}\n\n"
-        "Te va a pedir permisos de Page e Instagram. Acepta y vuelve acá.",
-        reply_markup=InlineKeyboardMarkup(kb)
+        "Acepta los permisos y vuelve aca."
     )
 
 async def handle_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -75,12 +69,11 @@ async def handle_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No veo links. Mandame links como https://...")
         return
 
-    await update.message.reply_text(f"🔍 Recibí {len(urls)} links. Procesando borradores...")
+    await update.message.reply_text(f"Recibi {len(urls)} link(s). Procesando...")
 
+    resultados = []
     for url in urls:
         prop = scrape_property(url)
-        
-        # Llamar a tu backend para crear borrador + copy IA
         try:
             resp = requests.post(f"{API_URL}/drafts", json={
                 "telegram_id": update.effective_user.id,
@@ -88,73 +81,25 @@ async def handle_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "raw_data": prop
             }, timeout=30)
             data = resp.json()
-            draft_id = data.get("draft_id")
-            
-            # Preview en Telegram
-            caption = (
-                f"📝 *Borrador #{draft_id}*\n"
-                f"*{prop['title']}*\n"
-                f"{prop['price']}\n\n"
-                f"{data.get('ai_copy','')[:800]}\n\n"
-                f"Fuente: {url}"
-            )
-            kb = [
-                [InlineKeyboardButton("📘 Publicar FB Feed", callback_data=f"pub:fb_feed:{draft_id}"),
-                 InlineKeyboardButton("📸 IG Feed", callback_data=f"pub:ig_feed:{draft_id}")],
-                [InlineKeyboardButton("🎬 IG Reel", callback_data=f"pub:ig_reel:{draft_id}"),
-                 InlineKeyboardButton("⭕ IG Historia", callback_data=f"pub:ig_story:{draft_id}")],
-                [InlineKeyboardButton("✏️ Editar Copy", callback_data=f"edit:{draft_id}"),
-                 InlineKeyboardButton("🗑️ Descartar", callback_data=f"del:{draft_id}")],
-                [InlineKeyboardButton("👀 Ver Dashboard", url=f"{APP_URL}/dashboard?tid={update.effective_user.id}")]
-            ]
-            # Si hay imagen, mandar con foto
-            if prop["images"]:
-                await context.bot.send_photo(
-                    chat_id=update.effective_chat.id,
-                    photo=prop["images"][0],
-                    caption=caption,
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup(kb)
-                )
-            else:
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=caption,
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup(kb)
-                )
+            draft_id = data.get("draft_id", "?")
+            n_fotos = len(prop.get("images", []))
+            resultados.append(f"OK - {prop['title'][:50]} ({n_fotos} fotos)")
         except Exception as e:
-            await update.message.reply_text(f"❌ Error con {url}: {e}")
+            resultados.append(f"Error - {url[:40]}: {e}")
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    action, target, draft_id = q.data.split(":")
+    resumen = "\n".join(f"- {r}" for r in resultados)
+    dashboard_url = f"{APP_URL}/dashboard?tid={update.effective_user.id}"
     
-    if action == "pub":
-        await q.edit_message_caption(caption=q.message.caption + f"\n\n⏳ Publicando en {target}...")
-        try:
-            r = requests.post(f"{API_URL}/publish", json={
-                "telegram_id": q.from_user.id,
-                "draft_id": draft_id,
-                "destination": target
-            }, timeout=60)
-            res = r.json()
-            if res.get("success"):
-                await q.edit_message_caption(caption=q.message.caption + f"\n\n✅ Publicado en {target}!\nID: {res.get('post_id')}")
-            else:
-                await context.bot.send_message(chat_id=q.message.chat_id, text=f"❌ Error: {res.get('error')}")
-        except Exception as e:
-            await context.bot.send_message(chat_id=q.message.chat_id, text=f"❌ Error publicando: {e}")
-    elif action == "del":
-        requests.delete(f"{API_URL}/drafts/{draft_id}", params={"telegram_id": q.from_user.id})
-        await q.edit_message_caption(caption="🗑️ Borrador descartado")
+    await update.message.reply_text(
+        f"Listo! Procese {len(urls)} propiedad(es):\n\n"
+        f"{resumen}\n\n"
+        f"Revisa los copies y publica desde el Dashboard:\n{dashboard_url}"
+    )
 
 if __name__ == "__main__":
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("conectar", conectar))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_links))
-    app.add_handler(CallbackQueryHandler(button_handler))
     print("Bot corriendo...")
     app.run_polling()
