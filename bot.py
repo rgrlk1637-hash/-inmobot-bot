@@ -18,7 +18,7 @@ def scrape_property(url: str):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(r.text, 'lxml')
+        soup = BeautifulSoup(r.text, 'html.parser')
         def og(prop):
             tag = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
             return tag["content"] if tag and tag.get("content") else ""
