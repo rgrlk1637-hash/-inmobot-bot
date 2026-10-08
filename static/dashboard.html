@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#06194a">
+<meta name="color-scheme" content="light">
+<title>InmoBot · LLAVE.IA</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="manifest" id="manifest" href="/manifest.json">
+<style>
+:root{
+  --bg:#eef2f8; --card:#fff; --ink:#0f1b3d; --muted:#55627f; --line:#dde4f0;
+  --navy:#06194a; --brand:#0b3a9e; --cyan:#1aa7d8; --silver:#c8d2e2;
+  --fb:#1877f2; --ig:#c2307f; --ok:#12804a; --bad:#c23b3b; --warn:#a96a00;
+  --r:14px; --sh:0 1px 2px rgba(6,25,74,.06),0 4px 14px rgba(6,25,74,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.4;padding-bottom:env(safe-area-inset-bottom)}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--cyan);outline-offset:2px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+
+/* encabezado */
+.top{background:linear-gradient(135deg,#06194a 0%,#0b3a9e 100%);color:#fff;padding:calc(12px + env(safe-area-inset-top)) 0 14px}
+.top .wrap{display:flex;align-items:center;gap:12px}
+.logo{width:56px;height:56px;border-radius:12px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.top h1{font-size:18px;font-weight:700;letter-spacing:.2px}
+.top .sub{font-size:12.5px;color:#cdd8f0;margin-top:2px}
+.top .grow{flex:1;min-width:0}
+.pill{display:inline-block;font-size:12px;padding:6px 10px;border-radius:99px;background:rgba(255,255,255,.14);color:#fff;text-decoration:none;white-space:nowrap}
+.pill.ok::before{content:"● ";color:#5be39a}
+.pill.go{background:#fff;color:var(--brand);font-weight:600}
+
+/* selector de mes */
+.mes{position:sticky;top:0;z-index:20;background:rgba(238,242,248,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.mes .wrap{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;padding-bottom:8px}
+.mes button{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:20px;color:var(--brand)}
+.mes button:disabled{opacity:.35;cursor:default}
+.mes .sel{flex:1;text-align:center}
+.mes select{appearance:none;font:inherit;font-weight:700;font-size:17px;color:var(--ink);background:transparent;border:0;text-align:center;text-align-last:center;width:100%;height:44px}
+.nota{font-size:12px;color:var(--muted);text-align:center;margin:10px 0 2px}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.kpi{background:var(--card);border-radius:var(--r);padding:14px;box-shadow:var(--sh);border-top:3px solid var(--cyan)}
+.kpi.b{border-top-color:var(--brand)} .kpi.w{border-top-color:#e0a21a} .kpi.g{border-top-color:var(--ok)}
+.kpi .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.kpi .n{font-size:34px;font-weight:800;line-height:1.1;margin:4px 0 2px;font-variant-numeric:tabular-nums}
+.kpi .d{font-size:12px;color:var(--muted)}
+.up{color:var(--ok);font-weight:600} .down{color:var(--bad);font-weight:600}
+
+/* graficos */
+.charts{display:grid;gap:10px;margin-top:10px}
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:14px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.card h2 button{font-size:12px;text-transform:none;letter-spacing:0;border:1px solid var(--line);background:#fff;border-radius:99px;padding:8px 12px;min-height:36px;color:var(--brand);font-weight:600}
+.leg{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
+.leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+svg{display:block;width:100%;height:auto}
+#gSem svg{max-height:210px}#gHist svg{max-height:170px}
+.charts{align-items:start}
+.vacio{color:var(--muted);font-size:13px;padding:14px 0;text-align:center}
+.toprow{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;font-size:13px;margin-bottom:10px}
+.toprow .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toprow .bar{grid-column:1/-1;height:6px;border-radius:99px;background:var(--bg);overflow:hidden}
+.toprow .bar b{display:block;height:100%;background:var(--cyan);border-radius:99px}
+
+/* buscador */
+.buscar{position:sticky;top:61px;z-index:15;background:var(--bg);padding:12px 0 8px}
+.sb{position:relative}
+.sb input{width:100%;height:48px;border-radius:14px;border:1.5px solid var(--silver);background:#fff;padding:0 44px 0 42px;font:inherit;font-size:16px;color:var(--ink)}
+.sb .ic{position:absolute;left:14px;top:13px;color:var(--muted);pointer-events:none}
+.sb .x{position:absolute;right:4px;top:2px;width:44px;height:44px;border:0;background:none;font-size:20px;color:var(--muted);display:none}
+.sug{position:absolute;left:0;right:0;top:52px;background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(6,25,74,.18);border:1px solid var(--line);overflow:hidden;display:none;z-index:30}
+.sug button{display:flex;width:100%;justify-content:space-between;gap:10px;text-align:left;border:0;background:#fff;padding:12px 14px;min-height:46px;border-bottom:1px solid var(--bg);color:var(--ink)}
+.sug button:last-child{border-bottom:0}
+.sug button[aria-selected=true],.sug button:hover{background:#eaf3ff}
+.sug .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;flex:none;align-self:center}
+.sug mark{background:none;color:var(--brand);font-weight:700}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--silver);background:#fff;border-radius:99px;padding:0 14px;min-height:40px;color:var(--ink);font-size:14px}
+.chip[aria-pressed=true]{background:var(--brand);border-color:var(--brand);color:#fff}
+.res{font-size:13px;color:var(--muted);margin:8px 0}
+
+/* avisos */
+.lista{display:grid;gap:12px;margin-bottom:40px}
+.aviso{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;display:flex;flex-direction:column}
+.aviso img{width:100%;height:190px;object-fit:cover;background:var(--bg)}
+.sinimg{height:64px;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--muted);font-size:13px}
+.ab{padding:14px;display:flex;flex-direction:column;gap:12px}
+.ah{display:flex;justify-content:space-between;gap:10px}
+.ah h3{font-size:16px;line-height:1.3}
+.meta{font-size:13px;color:var(--muted);margin-top:3px}
+.badge{font-size:11px;font-weight:700;padding:4px 9px;border-radius:99px;white-space:nowrap;align-self:flex-start}
+.badge.p{background:#fff2d6;color:var(--warn)} .badge.ok{background:#dff5e8;color:var(--ok)}
+.score{display:flex;align-items:center;gap:10px}
+.score .bar{flex:1;height:8px;border-radius:99px;background:var(--bg);overflow:hidden}
+.score .bar b{display:block;height:100%;border-radius:99px}
+.score .v{font-weight:800;font-size:15px;min-width:64px;text-align:right}
+details.tips{background:#f4f8ff;border-radius:10px;padding:0 12px}
+details.tips summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600;color:var(--brand);font-size:14px}
+details.tips ul{padding:0 0 12px 18px;font-size:13.5px;color:var(--ink)}
+details.tips li{margin-top:5px}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--bg);border-radius:12px;padding:3px}
+.seg button{border:0;background:none;min-height:42px;border-radius:10px;color:var(--muted);font-weight:600}
+.seg button[aria-pressed=true]{background:#fff;color:var(--brand);box-shadow:var(--sh)}
+label.cp{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);display:block;margin-bottom:5px}
+textarea{width:100%;min-height:210px;resize:vertical;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:15px;color:var(--ink)}
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.acts button{min-height:48px;border-radius:12px;border:0;color:#fff;font-weight:700;font-size:15px}
+.acts .fb{background:var(--fb)} .acts .ig{background:var(--ig)}
+.acts .del{grid-column:1/-1;background:#fff;color:var(--muted);border:1px solid var(--silver);font-weight:600;min-height:44px}
+.acts button:disabled{opacity:.5}
+.msg{font-size:13.5px;min-height:18px}
+.int{display:flex;flex-wrap:wrap;gap:8px;font-size:13px}
+.int span{background:var(--bg);border-radius:99px;padding:6px 11px}
+.fuente{font-size:12px;color:var(--muted)}
+.aviso{cursor:default}
+
+@media(min-width:640px){.kpis{grid-template-columns:repeat(4,1fr)}.lista{grid-template-columns:1fr 1fr}.kpi .n{font-size:38px}}
+@media(min-width:960px){.charts{grid-template-columns:repeat(3,1fr)}.charts .wide{grid-column:span 2}.lista{grid-template-columns:repeat(3,1fr)}.top h1{font-size:20px}.buscar{top:61px}}
+@media(prefers-reduced-motion:no-preference){.score .bar b,.toprow .bar b{transition:width .5s ease}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <img class="logo" src="/logo" alt="LLAVE.IA">
+  <div class="grow"><h1>InmoBot</h1><div class="sub" id="agente">Cargando…</div></div>
+  <div id="fbstat"></div>
+</div></header>
+
+<div class="mes"><div class="wrap">
+  <button id="prev" aria-label="Mes anterior">‹</button>
+  <div class="sel"><select id="mesSel" aria-label="Elegir mes"></select></div>
+  <button id="next" aria-label="Mes siguiente">›</button>
+</div></div>
+
+<main class="wrap">
+  <p class="nota" id="nota">Cada mes empieza en cero. El historial queda guardado.</p>
+  <section class="kpis" id="kpis" aria-label="Indicadores del mes"></section>
+  <section class="charts">
+    <div class="card wide"><h2>Publicaciones por semana</h2><div id="gSem"></div></div>
+    <div class="card"><h2>Facebook vs Instagram</h2><div id="gRed"></div></div>
+    <div class="card"><h2>Últimos 6 meses</h2><div id="gHist"></div></div>
+    <div class="card wide"><h2><span>Interacciones por aviso</span><button id="refresh" type="button">↻ Actualizar</button></h2><div id="gTop"></div><div class="fuente" id="actualizado"></div></div>
+  </section>
+
+  <section class="buscar" aria-label="Buscador">
+    <div class="sb">
+      <span class="ic" aria-hidden="true">🔍</span>
+      <input id="q" type="search" inputmode="search" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="sug" aria-autocomplete="list" placeholder="Buscar zona, tipo, precio…">
+      <button class="x" id="qx" type="button" aria-label="Borrar búsqueda">✕</button>
+      <div class="sug" id="sug" role="listbox"></div>
+    </div>
+    <div class="chips" id="chips"></div>
+  </section>
+  <div class="res" id="res" aria-live="polite"></div>
+  <section class="lista" id="lista"></section>
+</main>
+
+<script>
+(function(){
+"use strict";
+var params=new URLSearchParams(location.search);
+var TID=(params.get("tid")||"").replace(/\D/g,"");
+var K=(params.get("k")||"").replace(/[^\w-]/g,"");
+var S={data:null,mes:params.get("mes")||"",q:"",filtro:"todos",sel:-1,sugs:[],ed:{},vs:{}};
+var $=function(id){return document.getElementById(id)};
+
+if(!TID){document.body.innerHTML='<p style="padding:40px;font-family:sans-serif">Abrí este tablero desde el enlace que te manda el bot de Telegram.</p>';return;}
+$("manifest").href="/manifest.json?tid="+TID+"&k="+K;
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function norm(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"")}
+function num(n){return new Intl.NumberFormat("es-PY").format(n)}
+function urlOk(u){return /^https?:\/\//i.test(u||"")}
+
+/* ---------- carga ---------- */
+function cargar(mes){
+  var url="/api/dashboard?tid="+TID+"&k="+K+(mes?"&mes="+encodeURIComponent(mes):"");
+  return fetch(url).then(function(r){if(r.status===403){throw new Error("403")}return r.json()}).then(function(d){
+    S.data=d;S.mes=d.mes;pintar();
+  }).catch(function(e){$("agente").textContent=(e&&e.message==="403")?"Enlace inválido o vencido. Escribile /start al bot para recibir uno nuevo.":"No se pudo cargar. Reintentá en unos segundos."});
+}
+
+/* ---------- pintar ---------- */
+function pintar(){
+  var d=S.data,p=d.perfil;
+  $("agente").textContent=p.nombre?(p.nombre+(p.whatsapp?" · "+p.whatsapp:"")):"Falta tu WhatsApp: escribile /start al bot";
+  $("fbstat").innerHTML=p.fb_conectado?'<span class="pill ok">FB conectado</span>':'<a class="pill go" href="'+esc(p.login_url)+'">Conectar FB + IG</a>';
+  // mes
+  var sel=$("mesSel");sel.innerHTML=d.meses.map(function(m){return '<option value="'+m+'"'+(m===d.mes?" selected":"")+'>'+esc(etiquetaMes(m))+'</option>'}).join("");
+  var i=d.meses.indexOf(d.mes);$("next").disabled=i<=0;$("prev").disabled=i>=d.meses.length-1;
+  $("nota").textContent=d.mes===d.mes_actual?"Cada mes empieza en cero. El historial queda guardado.":"Estás viendo un mes anterior.";
+  kpis();grafSem();grafRed();grafHist();grafTop();lista();
+}
+var MESN=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+function etiquetaMes(k){return MESN[parseInt(k.slice(5),10)-1]+" "+k.slice(0,4)}
+
+function delta(a,b){var x=a-b;if(x===0)return '<span class="d">igual que el mes anterior</span>';
+  return '<span class="d"><span class="'+(x>0?"up":"down")+'">'+(x>0?"▲ +":"▼ ")+x+'</span> vs mes anterior</span>'}
+function kpis(){
+  var k=S.data.kpis,pr=k.prev;
+  $("kpis").innerHTML=
+   '<div class="kpi b"><div class="l">Publicados</div><div class="n">'+k.publicados+'</div>'+delta(k.publicados,pr.publicados)+'</div>'+
+   '<div class="kpi g"><div class="l">Interacciones</div><div class="n">'+num(k.interacciones)+'</div>'+delta(k.interacciones,pr.interacciones)+'</div>'+
+   '<div class="kpi w"><div class="l">Pendientes</div><div class="n">'+k.pendientes+'</div><span class="d">por revisar y publicar</span></div>'+
+   '<div class="kpi"><div class="l">Por red</div><div class="n" style="font-size:24px;margin-top:10px">FB '+k.fb+' · IG '+k.ig+'</div><span class="d">publicaciones del mes</span></div>';
+}
+
+/* ---------- graficos (SVG propio, sin librerias) ---------- */
+function grafSem(){
+  var s=S.data.semanal,max=Math.max.apply(null,s.map(function(x){return x.fb+x.ig}).concat([1]));
+  if(!s.some(function(x){return x.fb+x.ig>0})){$("gSem").innerHTML='<div class="vacio">Todavía no hay publicaciones este mes.</div>';return}
+  var W=320,H=150,pad=22,bw=(W-pad*2)/s.length,out='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Publicaciones por semana">';
+  s.forEach(function(x,i){
+    var hf=(x.fb/max)*(H-46),hi=(x.ig/max)*(H-46),cx=pad+i*bw+bw*.2,w=bw*.6,y=H-24;
+    if(x.ig)out+='<rect x="'+cx+'" y="'+(y-hi)+'" width="'+w+'" height="'+hi+'" rx="4" fill="var(--ig)"/>';
+    if(x.fb)out+='<rect x="'+cx+'" y="'+(y-hi-hf)+'" width="'+w+'" height="'+hf+'" rx="4" fill="var(--fb)"/>';
+    var t=x.fb+x.ig;if(t)out+='<text x="'+(cx+w/2)+'" y="'+(y-hi-hf-5)+'" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">'+t+'</text>';
+    out+='<text x="'+(cx+w/2)+'" y="'+(H-6)+'" text-anchor="middle" font-size="11" fill="var(--muted)">'+esc(x.label)+'</text>';
+  });
+  out+='<line x1="'+pad+'" x2="'+(W-pad)+'" y1="'+(H-24)+'" y2="'+(H-24)+'" stroke="var(--line)"/></svg>';
+  $("gSem").innerHTML=out+'<div class="leg"><span><i style="background:var(--fb)"></i>Facebook</span><span><i style="background:var(--ig)"></i>Instagram</span></div>';
+}
+function grafRed(){
+  var k=S.data.kpis,t=k.fb+k.ig;
+  if(!t){$("gRed").innerHTML='<div class="vacio">Sin datos este mes.</div>';return}
+  function fila(n,c,v,i){return '<div class="toprow"><span class="t">'+n+'</span><b>'+v+' · '+num(i)+' int.</b><div class="bar"><b style="width:'+(v/t*100)+'%;background:'+c+'"></b></div></div>'}
+  $("gRed").innerHTML=fila("Facebook","var(--fb)",k.fb,k.int_fb)+fila("Instagram","var(--ig)",k.ig,k.int_ig);
+}
+function grafHist(){
+  var h=S.data.historico,max=Math.max.apply(null,h.map(function(x){return x.publicados}).concat([1]));
+  if(!h.some(function(x){return x.publicados>0})){$("gHist").innerHTML='<div class="vacio">Aún sin historial.</div>';return}
+  var W=320,H=140,pad=14,bw=(W-pad*2)/h.length,out='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Publicaciones de los últimos 6 meses">';
+  h.forEach(function(x,i){
+    var hh=(x.publicados/max)*(H-44),cx=pad+i*bw+bw*.18,w=bw*.64,y=H-22,act=x.mes===S.data.mes;
+    out+='<rect x="'+cx+'" y="'+(y-hh)+'" width="'+w+'" height="'+Math.max(hh,2)+'" rx="4" fill="'+(act?"var(--brand)":"var(--silver)")+'"/>'+
+         '<text x="'+(cx+w/2)+'" y="'+(y-hh-5)+'" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">'+x.publicados+'</text>'+
+         '<text x="'+(cx+w/2)+'" y="'+(H-6)+'" text-anchor="middle" font-size="11" fill="var(--muted)">'+esc(x.label)+'</text>';
+  });
+  $("gHist").innerHTML=out+'</svg>';
+}
+function grafTop(){
+  var t=S.data.top;
+  $("actualizado").textContent=S.data.metricas_actualizadas?"Última actualización: "+S.data.metricas_actualizadas+" (me gusta, comentarios y compartidos).":"Todavía no se leyeron interacciones. Se actualizan solas cada pocas horas o con el botón.";
+  if(!t.length){$("gTop").innerHTML='<div class="vacio">Aún no hay interacciones registradas este mes.</div>';return}
+  var m=t[0].interacciones;
+  $("gTop").innerHTML=t.map(function(x){return '<div class="toprow"><span class="t">'+esc(x.title)+'</span><b>'+num(x.interacciones)+'</b><div class="bar"><b style="width:'+(x.interacciones/m*100)+'%"></b></div></div>'}).join("");
+}
+
+/* ---------- buscador ---------- */
+function haystack(a){return norm([a.title,a.zona,a.tipo,a.operacion,a.price,a.estado,a.pubs.map(function(p){return p.destino==="fb_feed"?"facebook":"instagram"}).join(" ")].join(" "))}
+function visibles(){
+  var d=S.data,q=norm(S.q).trim(),toks=q?q.split(/\s+/):[];
+  return d.avisos.filter(function(a){
+    if(toks.length){var h=haystack(a);if(!toks.every(function(t){return h.indexOf(t)>-1}))return false}
+    else{var enMes=a.meses_pub.indexOf(d.mes)>-1||(a.estado==="pendiente"&&(a.mes_creado===d.mes||d.mes===d.mes_actual));if(!enMes)return false}
+    if(S.filtro==="pendiente")return a.estado==="pendiente";
+    if(S.filtro==="publicado")return a.estado==="publicado";
+    if(S.filtro==="fb")return a.pubs.some(function(p){return p.destino==="fb_feed"});
+    if(S.filtro==="ig")return a.pubs.some(function(p){return p.destino==="ig_feed"});
+    return true;
+  });
+}
+function sugerencias(){
+  var q=norm(S.q).trim();if(q.length<1)return [];
+  var vistos={},out=[];
+  S.data.avisos.forEach(function(a){
+    [[a.zona,"Zona"],[(a.tipo&&a.operacion)?a.tipo+" en "+a.operacion:a.tipo,"Tipo"],[a.title,"Aviso"],[a.price,"Precio"]].forEach(function(c){
+      var t=c[0];if(!t)return;var n=norm(t),k=n+c[1];if(vistos[k])return;
+      var pos=n.indexOf(q);if(pos<0)return;vistos[k]=1;out.push({t:t,k:c[1],score:(pos===0?0:1)+(c[1]==="Zona"?0:.5)});
+    });
+  });
+  return out.sort(function(a,b){return a.score-b.score}).slice(0,8);
+}
+function resaltar(t,q){var n=norm(t),i=n.indexOf(norm(q).trim());if(i<0)return esc(t);var l=norm(q).trim().length;return esc(t.slice(0,i))+"<mark>"+esc(t.slice(i,i+l))+"</mark>"+esc(t.slice(i+l))}
+function pintarSug(){
+  var box=$("sug"),q=$("q");S.sugs=sugerencias();
+  if(!S.sugs.length){box.style.display="none";q.setAttribute("aria-expanded","false");return}
+  box.innerHTML=S.sugs.map(function(s,i){return '<button type="button" role="option" data-i="'+i+'" aria-selected="'+(i===S.sel)+'"><span>'+resaltar(s.t,S.q)+'</span><span class="k">'+s.k+'</span></button>'}).join("");
+  box.style.display="block";q.setAttribute("aria-expanded","true");
+}
+function elegirSug(i){var s=S.sugs[i];if(!s)return;S.q=s.t;$("q").value=s.t;cerrarSug();lista()}
+function cerrarSug(){$("sug").style.display="none";$("q").setAttribute("aria-expanded","false");S.sel=-1}
+function chips(){
+  var c=[["todos","Todos"],["pendiente","Pendientes"],["publicado","Publicados"],["fb","Facebook"],["ig","Instagram"]];
+  $("chips").innerHTML=c.map(function(x){return '<button type="button" class="chip" data-f="'+x[0]+'" aria-pressed="'+(S.filtro===x[0])+'">'+x[1]+'</button>'}).join("");
+}
+
+/* ---------- lista de avisos ---------- */
+function colorScore(v){return v>=80?"var(--ok)":v>=55?"#e0a21a":"var(--bad)"}
+function lista(){
+  var v=visibles(),q=S.q.trim();
+  $("res").textContent=q?(v.length+" resultado(s) en todos los meses para “"+q+"”"):(v.length+" aviso(s) en "+S.data.mes_label);
+  $("qx").style.display=q?"block":"none";
+  if(!v.length){$("lista").innerHTML='<div class="card vacio" style="grid-column:1/-1">'+(q?"Sin resultados. Probá con otra palabra.":"Sin avisos aquí. Mandale un link de propiedad al bot de Telegram para empezar.")+'</div>';return}
+  $("lista").innerHTML=v.map(tarjeta).join("");
+}
+function tarjeta(a){
+  var pub=a.estado==="publicado",sc=a.score,vsel=S.vs[a.id]||"emocional";
+  var tIg=S.ed["ig_"+a.id]!==undefined?S.ed["ig_"+a.id]:a.copy_ig,tFb=S.ed["fb_"+a.id]!==undefined?S.ed["fb_"+a.id]:a.copy_fb;
+  var img=urlOk(a.img)?'<img src="'+esc(a.img)+'" alt="" loading="lazy" referrerpolicy="no-referrer">':'<div class="sinimg">Sin imagen</div>';
+  var meta=[a.zona,a.price,a.n_fotos+" foto"+(a.n_fotos===1?"":"s")].filter(Boolean).join(" · ");
+  var tips=a.tips.length?'<details class="tips"><summary>💡 '+a.tips.length+' consejo'+(a.tips.length>1?"s":"")+' para mejorar</summary><ul>'+a.tips.map(function(t){return "<li>"+esc(t)+"</li>"}).join("")+'</ul></details>':'<div class="meta">✅ Aviso completo, sin consejos pendientes.</div>';
+  var ints=a.pubs.length?'<div class="int">'+a.pubs.map(function(p){return '<span>'+(p.destino==="fb_feed"?"FB":"IG")+' · ❤ '+p.likes+' · 💬 '+p.comments+(p.destino==="fb_feed"?' · ↗ '+p.shares:"")+'</span>'}).join("")+'</div>':"";
+  return '<article class="aviso" data-id="'+esc(a.id)+'">'+img+'<div class="ab">'+
+   '<div class="ah"><div><h3>'+esc(a.title)+'</h3><div class="meta">'+esc(meta)+'</div></div><span class="badge '+(pub?"ok":"p")+'">'+(pub?"PUBLICADO":"PENDIENTE")+'</span></div>'+
+   '<div class="score"><span class="meta">Calidad</span><div class="bar"><b style="width:'+sc+'%;background:'+colorScore(sc)+'"></b></div><span class="v" style="color:'+colorScore(sc)+'">'+sc+'/100</span></div>'+tips+ints+
+   '<div class="seg" role="group" aria-label="Estilo del texto"><button type="button" data-v="emocional" aria-pressed="'+(vsel!=="directa")+'">Emocional</button><button type="button" data-v="directa" aria-pressed="'+(vsel==="directa")+'">Directa</button></div>'+
+   '<div><label class="cp" for="ig_'+esc(a.id)+'">Texto Instagram</label><textarea id="ig_'+esc(a.id)+'">'+esc(tIg)+'</textarea></div>'+
+   '<div><label class="cp" for="fb_'+esc(a.id)+'">Texto Facebook</label><textarea id="fb_'+esc(a.id)+'">'+esc(tFb)+'</textarea></div>'+
+   '<div class="acts"><button type="button" class="fb" data-pub="fb_feed">Publicar en Facebook</button><button type="button" class="ig" data-pub="ig_feed"'+(a.n_fotos?"":" disabled title=\"Instagram necesita una foto\"")+'>Publicar en Instagram</button><button type="button" class="del" data-del="1">Descartar</button></div>'+
+   '<div class="msg" role="status" aria-live="polite"></div>'+
+   (urlOk(a.source_url)?'<a class="fuente" href="'+esc(a.source_url)+'" target="_blank" rel="noopener noreferrer">Ver aviso de origen →</a>':"")+
+   '<div class="fuente">Cargado '+esc(a.creado)+'</div></div></article>';
+}
+function buscarAviso(id){return S.data.avisos.filter(function(a){return a.id===id})[0]}
+
+/* ---------- eventos ---------- */
+$("lista").addEventListener("click",function(e){
+  var card=e.target.closest(".aviso");if(!card)return;var id=card.dataset.id,a=buscarAviso(id),msg=card.querySelector(".msg");
+  var seg=e.target.closest("[data-v]");
+  if(seg){var v=a.variantes[seg.dataset.v];card.querySelectorAll("[data-v]").forEach(function(b){b.setAttribute("aria-pressed",b===seg)});
+    S.vs[id]=seg.dataset.v;S.ed["ig_"+id]=v.ig;S.ed["fb_"+id]=v.fb;card.querySelector("#ig_"+id).value=v.ig;card.querySelector("#fb_"+id).value=v.fb;return}
+  var pub=e.target.closest("[data-pub]");
+  if(pub){var dest=pub.dataset.pub,txt=card.querySelector("#"+(dest==="fb_feed"?"fb_":"ig_")+id).value;
+    pub.disabled=true;msg.style.color="var(--muted)";msg.textContent="Publicando…";
+    fetch("/api/publish",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({telegram_id:parseInt(TID,10),draft_id:id,destination:dest,texto:txt,k:K})})
+     .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+     .then(function(x){if(x.j.success){msg.style.color="var(--ok)";msg.textContent="¡Publicado!";setTimeout(function(){cargar(S.mes)},1200)}
+       else{pub.disabled=false;msg.style.color="var(--bad)";msg.textContent="No se pudo publicar: "+(x.j.error||x.j.detail||"error desconocido")}})
+     .catch(function(){pub.disabled=false;msg.style.color="var(--bad)";msg.textContent="Sin conexión. Reintentá."});return}
+  if(e.target.closest("[data-del]")){if(!confirm("¿Descartar este aviso? No se puede deshacer."))return;
+    fetch("/api/drafts/"+id+"?telegram_id="+TID+"&k="+K,{method:"DELETE"}).then(function(){cargar(S.mes)})}
+});
+$("lista").addEventListener("input",function(e){if(e.target.tagName==="TEXTAREA")S.ed[e.target.id]=e.target.value});
+$("mesSel").addEventListener("change",function(){cargar(this.value)});
+$("prev").addEventListener("click",function(){var i=S.data.meses.indexOf(S.data.mes);if(i<S.data.meses.length-1)cargar(S.data.meses[i+1])});
+$("next").addEventListener("click",function(){var i=S.data.meses.indexOf(S.data.mes);if(i>0)cargar(S.data.meses[i-1])});
+$("refresh").addEventListener("click",function(){var b=this;b.disabled=true;b.textContent="Actualizando…";
+  fetch("/api/metricas/refresh",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({telegram_id:parseInt(TID,10),k:K})})
+   .then(function(r){return r.json()}).then(function(j){return cargar(S.mes).then(function(){if(j.motivo)$("actualizado").textContent=j.motivo+": conectá tu Facebook para leer interacciones."})})
+   .finally(function(){b.disabled=false;b.textContent="↻ Actualizar"})});
+$("q").addEventListener("input",function(){S.q=this.value;S.sel=-1;pintarSug();lista()});
+$("q").addEventListener("keydown",function(e){
+  if(e.key==="ArrowDown"){e.preventDefault();S.sel=Math.min(S.sel+1,S.sugs.length-1);pintarSug()}
+  else if(e.key==="ArrowUp"){e.preventDefault();S.sel=Math.max(S.sel-1,0);pintarSug()}
+  else if(e.key==="Enter"){if(S.sel>-1){e.preventDefault();elegirSug(S.sel)}else cerrarSug()}
+  else if(e.key==="Escape")cerrarSug();
+});
+$("sug").addEventListener("mousedown",function(e){var b=e.target.closest("button");if(b){e.preventDefault();elegirSug(parseInt(b.dataset.i,10))}});
+$("q").addEventListener("blur",function(){setTimeout(cerrarSug,120)});
+$("qx").addEventListener("click",function(){S.q="";$("q").value="";cerrarSug();lista();$("q").focus()});
+$("chips").addEventListener("click",function(e){var b=e.target.closest("[data-f]");if(!b)return;S.filtro=b.dataset.f;chips();lista()});
+
+chips();cargar(S.mes);
+})();
+</script>
+</body>
+</html>
