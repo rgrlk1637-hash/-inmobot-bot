@@ -1,8 +1,8 @@
 import os, re, asyncio, logging
 from dotenv import load_dotenv
 import requests
-from bs4 import BeautifulSoup
 from seguridad import bot_key
+from fotos import extraer_propiedad
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
@@ -19,20 +19,7 @@ logging.basicConfig(level=logging.INFO)
 # El servidor extrae unicamente hechos (tipo, zona, dormitorios...) y descarta el resto.
 def scrape_property(url: str):
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        def og(prop):
-            tag = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
-            return tag["content"] if tag and tag.get("content") else ""
-
-        title = og("og:title") or (soup.title.string if soup.title and soup.title.string else "Propiedad")
-        desc = og("og:description") or ""
-        images = [m["content"] for m in soup.find_all("meta", property="og:image") if m.get("content")]
-        price_match = re.search(r"(USD|U\$S|US\$|\$|Gs\.)\s?[\d\.,]+", r.text)
-        price = price_match.group(0) if price_match else ""
-        return {"url": url, "title": title[:200], "description": desc[:1000], "images": images[:10], "price": price}
+        return extraer_propiedad(url)
     except Exception as e:
         return {"url": url, "title": "Propiedad", "description": "", "images": [], "price": "", "error": str(e)}
 
@@ -121,8 +108,14 @@ async def conectar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _procesar_link(tid, url):
-    prop = scrape_property(url)
-    resp = _post("/drafts", {"telegram_id": tid, "source_url": url, "raw_data": prop})
+    # El servidor lee la galería, descarga las fotos y las guarda junto al borrador.
+    resp = _post("/drafts", {"telegram_id": tid, "source_url": url, "raw_data": {}}, timeout=(10, 300))
+    if not resp.ok:
+        try:
+            detail = resp.json().get("detail")
+        except ValueError:
+            detail = None
+        raise ValueError(detail or "No se pudo preparar la propiedad. Probá de nuevo más tarde.")
     resp.raise_for_status()
     return resp.json()
 
@@ -149,7 +142,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             d = await asyncio.to_thread(_procesar_link, tid, url)
             dash = d.get("dash") or dash
             nota = f"{d['score']}/100 · {d['n_fotos']} foto(s)"
-            consejo = f"\n   💡 {d['tips'][0]}" if d.get("tips") else ""
+            advertencias = d.get("photo_warnings") or d.get("tips") or []
+            consejo = f"\n   💡 {advertencias[0]}" if advertencias else ""
             lineas.append(f"✅ {d['titulo'][:60]} ({nota}){consejo}")
         except Exception as e:
             lineas.append(f"❌ {url[:40]}: {e}")

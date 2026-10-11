@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+.codex-remote-attachments/
+respaldos/
+analisis/qa-galeria/
+.qa-browsers/
+.codex-entrega/

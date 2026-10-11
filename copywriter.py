@@ -5,6 +5,7 @@ dormitorios, etc.). Ningun texto libre del portal se copia, asi no pasan telefon
 firmas ni CTAs del agente que lo publico originalmente.
 """
 import re
+from decimal import Decimal, InvalidOperation
 
 _RE_URL = re.compile(r"https?://\S+|www\.\S+", re.I)
 _RE_MAIL = re.compile(r"\S+@\S+\.\S+")
@@ -63,14 +64,40 @@ def limpiar_titulo(titulo: str) -> str:
 
 
 def normalizar_precio(texto: str) -> str:
-    m = re.search(r"(USD|U\$S|US\$|\$|Gs\.?|₲)\s*([\d.,]+)", texto or "", re.I)
+    m = re.search(r"(USD|U\$S|US\$|\$|Gs\.?|PYG|₲)\s*([\d.,]+)", texto or "", re.I)
     if not m:
         return ""
-    digitos = re.sub(r"\D", "", m.group(2))
-    if len(digitos) < 4:
+    valor = m.group(2).rstrip('.,')
+    separadores = {c for c in valor if c in '.,'}
+    decimal = None
+    if separadores:
+        ultimo = max(valor.rfind('.'), valor.rfind(','))
+        if len(valor) - ultimo - 1 in (1, 2):
+            decimal = valor[ultimo]
+        elif len(valor) - ultimo - 1 != 3:
+            return ""
+    if decimal:
+        entero, fraccion = valor.rsplit(decimal, 1)
+        miles = ',' if decimal == '.' else '.'
+        if decimal in entero or (miles in entero and not re.fullmatch(r'\d{1,3}(?:' + re.escape(miles) + r'\d{3})+', entero)):
+            return ""
+        valor = entero.replace(miles, '') + '.' + fraccion
+    elif separadores:
+        if len(separadores) != 1:
+            return ""
+        miles = next(iter(separadores))
+        if not re.fullmatch(r'\d{1,3}(?:' + re.escape(miles) + r'\d{3})+', valor):
+            return ""
+        valor = valor.replace(miles, '')
+    try:
+        importe = Decimal(valor)
+    except InvalidOperation:
         return ""
-    moneda = "Gs." if m.group(1).lower().startswith(("gs", "₲")) else "USD"
-    return f"{moneda} {int(digitos):,}".replace(",", ".")
+    if importe <= 0:
+        return ""
+    moneda = "Gs." if m.group(1).lower().startswith(("gs", "pyg", "₲")) else "USD"
+    numero = format(importe, ',.2f').translate(str.maketrans({',': '.', '.': ','}))
+    return f"{moneda} {numero.removesuffix(',00')}"
 
 
 def _num(rx, texto):

@@ -90,6 +90,20 @@ svg{display:block;width:100%;height:auto}
 .lista{display:grid;gap:12px;margin-bottom:40px}
 .aviso{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;display:flex;flex-direction:column}
 .aviso img{width:100%;height:190px;object-fit:cover;background:var(--bg)}
+.galeria{padding:10px;background:#f4f7fc}
+.galeria .foto-grande{display:block}
+.galeria .foto-grande img{height:260px;object-fit:contain;background:#fff;border-radius:8px}
+.galeria .controles{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0}
+.galeria .controles button{min-width:44px;min-height:44px;border:1px solid var(--silver);border-radius:10px;background:#fff;color:var(--brand)}
+.galeria button:disabled{opacity:.4;cursor:default}
+.galeria .miniaturas{display:flex;gap:6px;overflow-x:auto;padding:3px 2px 6px}
+.galeria .miniaturas button{flex:0 0 68px;padding:2px;border:2px solid transparent;border-radius:7px;background:#fff}
+.galeria .miniaturas button[aria-pressed=true]{border-color:var(--brand)}
+.galeria .miniaturas img{display:block;width:60px;height:48px;object-fit:contain;background:#fff}
+.fotos-aviso{padding:10px 12px;background:#fff2d6;color:#664400;border-radius:8px;font-size:13px}
+.actualizar-fotos{min-height:44px;background:#fff;color:var(--brand);border:1px solid var(--silver);border-radius:10px;padding:8px 12px}
+.pagina{width:100%;min-height:44px;border:1px solid var(--silver);border-radius:10px;padding:8px;background:#fff;font:inherit}
+.acts .ambas{grid-column:1/-1;background:var(--brand)}
 .sinimg{height:64px;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--muted);font-size:13px}
 .ab{padding:14px;display:flex;flex-direction:column;gap:12px}
 .ah{display:flex;justify-content:space-between;gap:10px}
@@ -304,37 +318,101 @@ function lista(){
 function tarjeta(a){
   var pub=a.estado==="publicado",sc=a.score,vsel=S.vs[a.id]||"emocional";
   var tIg=S.ed["ig_"+a.id]!==undefined?S.ed["ig_"+a.id]:a.copy_ig,tFb=S.ed["fb_"+a.id]!==undefined?S.ed["fb_"+a.id]:a.copy_fb;
-  var img=urlOk(a.img)?'<img src="'+esc(a.img)+'" alt="" loading="lazy" referrerpolicy="no-referrer">':'<div class="sinimg">Sin imagen</div>';
+  var fotos=(a.images||[a.img]).filter(urlOk),img=galeria(fotos);
+  var avisos=(a.photo_warnings||[]).slice();
+  if(!a.photos_saved)avisos.unshift("Este aviso es anterior a la descarga automática. Completá sus fotos con el botón de abajo.");
+  var advertencia=avisos.length?'<div class="fotos-aviso">'+avisos.map(esc).join('<br>')+'</div>':'';
+  var puedePublicar=a.photos_saved&&!a.photos_incomplete&&fotos.length>0;
+  var publicadoEn=function(dest){return a.pubs.some(function(p){return p.destino===dest})};
+  var pendienteEn=function(dest){return (a.publish_pending||[]).indexOf(dest)!==-1};
+  var pages=S.data.perfil.pages||[];
+  var pagina=pages.length>1?'<label>Publicar en la página<select class="pagina"><option value="">Elegí una página</option>'+pages.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>'}).join('')+'</select></label>':'';
   var meta=[a.zona,a.price,a.n_fotos+" foto"+(a.n_fotos===1?"":"s")].filter(Boolean).join(" · ");
   var tips=a.tips.length?'<details class="tips"><summary>💡 '+a.tips.length+' consejo'+(a.tips.length>1?"s":"")+' para mejorar</summary><ul>'+a.tips.map(function(t){return "<li>"+esc(t)+"</li>"}).join("")+'</ul></details>':'<div class="meta">✅ Aviso completo, sin consejos pendientes.</div>';
   var ints=a.pubs.length?'<div class="int">'+a.pubs.map(function(p){return '<span>'+(p.destino==="fb_feed"?"FB":"IG")+' · ❤ '+p.likes+' · 💬 '+p.comments+(p.destino==="fb_feed"?' · ↗ '+p.shares:"")+'</span>'}).join("")+'</div>':"";
   return '<article class="aviso" data-id="'+esc(a.id)+'">'+img+'<div class="ab">'+
    '<div class="ah"><div><h3>'+esc(a.title)+'</h3><div class="meta">'+esc(meta)+'</div></div><span class="badge '+(pub?"ok":"p")+'">'+(pub?"PUBLICADO":"PENDIENTE")+'</span></div>'+
+   advertencia+(!pub&&!(a.publish_pending||[]).length?'<button type="button" class="actualizar-fotos" data-refresh-photos="1">'+(a.photos_saved?'Actualizar fotos del enlace':'Completar fotos del enlace')+'</button>':'')+
    '<div class="score"><span class="meta">Calidad</span><div class="bar"><b style="width:'+sc+'%;background:'+colorScore(sc)+'"></b></div><span class="v" style="color:'+colorScore(sc)+'">'+sc+'/100</span></div>'+tips+ints+
    '<div class="seg" role="group" aria-label="Estilo del texto"><button type="button" data-v="emocional" aria-pressed="'+(vsel!=="directa")+'">Emocional</button><button type="button" data-v="directa" aria-pressed="'+(vsel==="directa")+'">Directa</button></div>'+
    '<div><label class="cp" for="ig_'+esc(a.id)+'">Texto Instagram</label><textarea id="ig_'+esc(a.id)+'">'+esc(tIg)+'</textarea></div>'+
    '<div><label class="cp" for="fb_'+esc(a.id)+'">Texto Facebook</label><textarea id="fb_'+esc(a.id)+'">'+esc(tFb)+'</textarea></div>'+
-   '<div class="acts"><button type="button" class="fb" data-pub="fb_feed">Publicar en Facebook</button><button type="button" class="ig" data-pub="ig_feed"'+(a.n_fotos?"":" disabled title=\"Instagram necesita una foto\"")+'>Publicar en Instagram</button><button type="button" class="del" data-del="1">Descartar</button></div>'+
+   pagina+'<div class="acts"><button type="button" class="fb" data-pub="fb_feed"'+(!puedePublicar||publicadoEn('fb_feed')||pendienteEn('fb_feed')?' disabled':'')+'>'+(publicadoEn('fb_feed')?'Publicado en Facebook':'Publicar en Facebook')+'</button>'+
+   '<button type="button" class="ig" data-pub="ig_feed"'+(!puedePublicar||publicadoEn('ig_feed')||pendienteEn('ig_feed')?' disabled':'')+'>'+(publicadoEn('ig_feed')?'Publicado en Instagram':'Publicar en Instagram')+'</button>'+
+   '<button type="button" class="ambas" data-pub="both"'+(!puedePublicar||(publicadoEn('fb_feed')&&publicadoEn('ig_feed'))||(a.publish_pending||[]).length?' disabled':'')+'>Publicar en ambas</button>'+
+   '<button type="button" class="del" data-del="1">Descartar</button></div>'+
    '<div class="msg" role="status" aria-live="polite"></div>'+
    (urlOk(a.source_url)?'<a class="fuente" href="'+esc(a.source_url)+'" target="_blank" rel="noopener noreferrer">Ver aviso de origen →</a>':"")+
    '<div class="fuente">Cargado '+esc(a.creado)+'</div></div></article>';
 }
 function buscarAviso(id){return S.data.avisos.filter(function(a){return a.id===id})[0]}
 
+function galeria(fotos){
+  if(!fotos.length)return '<div class="sinimg">Sin imágenes</div>';
+  return '<div class="galeria" data-index="0"><a class="foto-grande" href="'+esc(fotos[0])+'" target="_blank" rel="noopener noreferrer" aria-label="Ampliar foto"><img src="'+esc(fotos[0])+'" alt="Foto 1 de '+fotos.length+' de la propiedad" loading="lazy" referrerpolicy="no-referrer"></a>'+
+    '<div class="controles"><button type="button" data-photo-step="-1" aria-label="Foto anterior" disabled>‹</button><span class="contador" aria-live="polite">1 / '+fotos.length+'</span><button type="button" data-photo-step="1" aria-label="Foto siguiente"'+(fotos.length<2?' disabled':'')+'>›</button></div>'+
+    '<div class="miniaturas" role="group" aria-label="Fotos de la propiedad">'+fotos.map(function(url,i){return '<button type="button" data-photo-index="'+i+'" aria-label="Ver foto '+(i+1)+'" aria-pressed="'+(i===0)+'"><img src="'+esc(url)+'" alt="" loading="lazy" referrerpolicy="no-referrer"></button>'}).join('')+'</div></div>';
+}
+
+function mostrarFoto(card,a,index){
+  var fotos=(a.images||[a.img]).filter(urlOk),g=card.querySelector('.galeria');
+  index=Math.max(0,Math.min(fotos.length-1,index));g.dataset.index=index;
+  var link=g.querySelector('.foto-grande'),img=link.querySelector('img');
+  link.href=fotos[index];img.src=fotos[index];img.alt='Foto '+(index+1)+' de '+fotos.length+' de la propiedad';
+  g.querySelector('.contador').textContent=(index+1)+' / '+fotos.length;
+  g.querySelector('[data-photo-step="-1"]').disabled=index===0;
+  g.querySelector('[data-photo-step="1"]').disabled=index===fotos.length-1;
+  g.querySelectorAll('[data-photo-index]').forEach(function(b){b.setAttribute('aria-pressed',Number(b.dataset.photoIndex)===index)});
+}
+
+async function publicarAviso(card,a,dest,msg){
+  var selector=card.querySelector('.pagina'),pages=S.data.perfil.pages||[];
+  var pageId=selector?selector.value:(pages.length===1?pages[0].id:'');
+  if(pages.length>1&&!pageId){msg.style.color='var(--bad)';msg.textContent='Elegí la página de Facebook antes de publicar.';selector.focus();return}
+  var destinations=dest==='both'?['fb_feed','ig_feed']:[dest],results=[],failed=false;
+  var buttons=Array.from(card.querySelectorAll('.acts button,[data-refresh-photos]'));
+  var estados=buttons.map(function(b){return b.disabled});buttons.forEach(function(b){b.disabled=true});
+  for(var network of destinations){
+    var label=network==='fb_feed'?'Facebook':'Instagram';
+    msg.style.color='var(--muted)';msg.textContent='Publicando '+a.n_fotos+' fotos en '+label+'…';
+    try{
+      var response=await fetch('/api/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:parseInt(TID,10),draft_id:a.id,destination:network,texto:card.querySelector('#'+(network==='fb_feed'?'fb_':'ig_')+a.id).value,k:K,page_id:pageId})});
+      var result=await response.json();
+      if(!response.ok||!result.success){
+        failed=true;results.push(label+': '+(result.error||result.detail||'No se pudo publicar.'));
+        if(result.requires_review){a.publish_pending=a.publish_pending||[];a.publish_pending.push(network)}
+      }else{
+        results.push(label+': '+(result.already_published?'ya estaba publicado.':'publicado.'));
+        if(!a.pubs.some(function(p){return p.destino===network}))a.pubs.push({destino:network});
+      }
+    }catch(error){failed=true;results.push(label+': no se recibió confirmación. Revisá la cuenta antes de repetir.')}
+  }
+  buttons.forEach(function(b,i){b.disabled=estados[i]});
+  a.pubs.forEach(function(p){var b=card.querySelector('[data-pub="'+p.destino+'"]');if(b)b.disabled=true});
+  (a.publish_pending||[]).forEach(function(p){var b=card.querySelector('[data-pub="'+p+'"]');if(b)b.disabled=true});
+  if((a.publish_pending||[]).length||a.pubs.length>=2)card.querySelector('[data-pub="both"]').disabled=true;
+  msg.style.color=failed?'var(--bad)':'var(--ok)';msg.textContent=results.join(' ');
+  if(!failed)setTimeout(function(){cargar(S.mes)},1500);
+}
+
 /* ---------- eventos ---------- */
 $("lista").addEventListener("click",function(e){
   var card=e.target.closest(".aviso");if(!card)return;var id=card.dataset.id,a=buscarAviso(id),msg=card.querySelector(".msg");
+  var photo=e.target.closest('[data-photo-index]'),step=e.target.closest('[data-photo-step]');
+  if(photo||step){mostrarFoto(card,a,photo?Number(photo.dataset.photoIndex):Number(card.querySelector('.galeria').dataset.index)+Number(step.dataset.photoStep));return}
+  var refreshPhotos=e.target.closest('[data-refresh-photos]');
+  if(refreshPhotos){
+    refreshPhotos.disabled=true;msg.style.color='var(--muted)';msg.textContent='Descargando las fotos del enlace…';
+    fetch('/api/drafts/'+encodeURIComponent(id)+'/photos/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:parseInt(TID,10),k:K})})
+      .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.detail||'No se pudieron actualizar las fotos.');return j})})
+      .then(function(){return cargar(S.mes)})
+      .catch(function(err){refreshPhotos.disabled=false;msg.style.color='var(--bad)';msg.textContent=err.message});return;
+  }
   var seg=e.target.closest("[data-v]");
   if(seg){var v=a.variantes[seg.dataset.v];card.querySelectorAll("[data-v]").forEach(function(b){b.setAttribute("aria-pressed",b===seg)});
     S.vs[id]=seg.dataset.v;S.ed["ig_"+id]=v.ig;S.ed["fb_"+id]=v.fb;card.querySelector("#ig_"+id).value=v.ig;card.querySelector("#fb_"+id).value=v.fb;return}
   var pub=e.target.closest("[data-pub]");
-  if(pub){var dest=pub.dataset.pub,txt=card.querySelector("#"+(dest==="fb_feed"?"fb_":"ig_")+id).value;
-    pub.disabled=true;msg.style.color="var(--muted)";msg.textContent="Publicando…";
-    fetch("/api/publish",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({telegram_id:parseInt(TID,10),draft_id:id,destination:dest,texto:txt,k:K})})
-     .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
-     .then(function(x){if(x.j.success){msg.style.color="var(--ok)";msg.textContent="¡Publicado!";setTimeout(function(){cargar(S.mes)},1200)}
-       else{pub.disabled=false;msg.style.color="var(--bad)";msg.textContent="No se pudo publicar: "+(x.j.error||x.j.detail||"error desconocido")}})
-     .catch(function(){pub.disabled=false;msg.style.color="var(--bad)";msg.textContent="Sin conexión. Reintentá."});return}
+  if(pub){publicarAviso(card,a,pub.dataset.pub,msg);return}
   if(e.target.closest("[data-del]")){if(!confirm("¿Descartar este aviso? No se puede deshacer."))return;
     fetch("/api/drafts/"+id+"?telegram_id="+TID+"&k="+K,{method:"DELETE"}).then(function(){cargar(S.mes)})}
 });
