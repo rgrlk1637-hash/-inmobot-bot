@@ -22,7 +22,7 @@ Las evidencias locales están en `analisis/qa-galeria/`. No se incorporan al rep
 
 La extracción completa está verificada con los enlaces de CENTURY 21 Paraguay y RE/MAX Paraguay indicados. Otros sitios se leen mediante sus galerías explícitas y datos estructurados. No se garantiza cualquier enlace de Internet; algunos portales requieren un extractor específico o impiden la descarga.
 
-El servicio necesita `DATABASE_URL` persistente y `APP_URL` con una dirección HTTPS accesible para que Instagram pueda descargar las fotos. La migración agrega la tabla `draft_photos` y columnas auxiliares a los borradores sin borrar los registros existentes. `META_GRAPH_VERSION` permite configurar la versión de Meta; el valor predeterminado es `v26.0`.
+El servicio necesita `DATABASE_URL` persistente y `APP_URL` con una dirección HTTPS accesible para que Instagram pueda descargar las fotos. `.python-version` fija Python 3.12.14, compatible con las dependencias existentes y usado en las pruebas; el Python 3.13 predeterminado de Railway no compila `psycopg2-binary==2.9.9`. La migración agrega la tabla `draft_photos` y columnas auxiliares a los borradores sin borrar los registros existentes. `META_GRAPH_VERSION` permite configurar la versión de Meta; el valor predeterminado es `v26.0`.
 
 La app de Elvio existe en Meta, pero la instalación consultada conserva `FACEBOOK_APP_ID=placeholder` y no registra ninguna cuenta de Facebook conectada. Deben configurarse la app real, sus permisos y el retorno OAuth en `/auth/callback`, y completar la autorización de la página y la cuenta profesional de Instagram. Las pruebas de publicación ejecutadas aquí fueron simuladas: no se publicó contenido en ninguna cuenta real.
 
