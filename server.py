@@ -7,18 +7,19 @@ from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, Resp
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, inspect, text
+from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, LargeBinary, ForeignKey, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from copywriter import extraer_datos, generar_variantes, evaluar, normalizar_wa
 from seguridad import bot_key, firmar_state, state_valido
+from fotos import extraer_propiedad, descargar_fotos, validar_url_publica
+from publicador import GRAPH, GRAPH_VERSION, publicar_facebook, publicar_instagram, ErrorPublicacion, ResultadoIncierto
 
 load_dotenv()
-APP_URL = os.getenv("APP_URL", "http://localhost:8000")
+APP_URL = os.getenv("APP_URL", "http://localhost:8000").rstrip("/")
 FB_APP_ID = os.getenv("FACEBOOK_APP_ID")
 FB_SECRET = os.getenv("FACEBOOK_APP_SECRET")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
-GRAPH = "https://graph.facebook.com/v19.0"
 # Si se define, solo estos Telegram IDs pueden registrarse (separados por coma). Vacio = abierto.
 ALLOWED_IDS = {x.strip() for x in os.getenv("ALLOWED_IDS", "").split(",") if x.strip()}
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -76,6 +77,21 @@ class Draft(Base):
     published_at = Column(DateTime, nullable=True)
     datos_json = Column(Text, default="")          # hechos extraidos (tipo, zona, ...)
     variantes_json = Column(Text, default="")      # emocional / directa x ig / fb
+    photos_meta_json = Column(Text, default="{}")
+    publish_pending_json = Column(Text, default="{}")
+
+
+class DraftPhoto(Base):
+    """Los archivos viven en la misma base persistente que los borradores."""
+    __tablename__ = "draft_photos"
+    id = Column(String, primary_key=True)
+    draft_id = Column(String, ForeignKey("drafts.id", ondelete="CASCADE"), index=True, nullable=False)
+    position = Column(Integer, nullable=False)
+    source_url = Column(Text)
+    sha256 = Column(String)
+    original = Column(LargeBinary, nullable=False)
+    jpeg = Column(LargeBinary, nullable=False)
+    instagram = Column(LargeBinary, nullable=False)
 
 
 class Publicacion(Base):
@@ -216,6 +232,7 @@ class PublishReq(BaseModel):
     destination: str
     texto: Optional[str] = None
     k: str = ""
+    page_id: str = ""
 
 
 class PerfilReq(BaseModel):
@@ -321,7 +338,7 @@ def fb_login(telegram_id: str, k: str = ""):
     scopes = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,business_management"
     redirect_uri = f"{APP_URL}/auth/callback"
     state = firmar_state(telegram_id, uuid.uuid4().hex[:12])
-    url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={FB_APP_ID}&redirect_uri={redirect_uri}&scope={scopes}&state={state}&response_type=code"
+    url = f"https://www.facebook.com/{GRAPH_VERSION}/dialog/oauth?client_id={FB_APP_ID}&redirect_uri={redirect_uri}&scope={scopes}&state={state}&response_type=code"
     return RedirectResponse(url)
 
 
@@ -354,12 +371,48 @@ def fb_callback(code: str, state: str):
 
 
 # --- DRAFTS ---
+_DRAFT_LOCKS = [threading.Lock() for _ in range(64)]
+
+
+def _preparar_fotos(source_url):
+    try:
+        raw = extraer_propiedad(source_url)
+        photos, warnings, incomplete = descargar_fotos(raw["images"], raw.get("url", source_url))
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(422, "El portal cambió el formato de su galería. No se creó un aviso incompleto.") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if raw.get("gallery_warning"):
+        warnings.insert(0, raw["gallery_warning"])
+        incomplete = True
+    meta = {"saved": True, "found": raw.get("images_found", len(raw["images"])),
+            "downloaded": len(photos), "incomplete": incomplete, "warnings": warnings}
+    return raw, photos, meta
+
+
+def _guardar_fotos(db, draft, photos, meta):
+    db.query(DraftPhoto).filter_by(draft_id=draft.id).delete()
+    urls = []
+    for index, photo in enumerate(photos):
+        ident = uuid.uuid4().hex
+        db.add(DraftPhoto(id=ident, draft_id=draft.id, position=index,
+                         source_url=photo["source_url"], sha256=photo["sha256"],
+                         original=photo["original"], jpeg=photo["jpeg"], instagram=photo["instagram"]))
+        urls.append(f"{APP_URL}/media/{ident}.jpg")
+    draft.images_json = json.dumps(urls)
+    draft.photos_meta_json = json.dumps(meta, ensure_ascii=False)
+
+
 @app.post("/api/drafts", dependencies=[Depends(requiere_bot)])
 def create_draft(payload: CreateDraft):
-    raw = payload.raw_data
     tid = str(payload.telegram_id)
+    # Extraer en el servidor evita depender del disco del proceso de Telegram.
+    with SessionLocal() as db:
+        perfil = db.query(Profile).filter_by(telegram_id=tid).first()
+        if not perfil or (ALLOWED_IDS and tid not in ALLOWED_IDS):
+            raise HTTPException(403, "Registrate primero con /start en el bot.")
+    raw, photos, meta = _preparar_fotos(payload.source_url)
     datos = extraer_datos(raw)
-    imagenes = [u for u in raw.get("images", []) if isinstance(u, str) and u.startswith("http")][:10]
     db = SessionLocal()
     try:
         perfil = db.query(Profile).filter_by(telegram_id=tid).first()
@@ -367,34 +420,71 @@ def create_draft(payload: CreateDraft):
         wa = perfil.whatsapp if perfil else ""
         variantes = generar_variantes(datos, nombre, wa)
         base = variantes["emocional"]
-        score, tips = evaluar(datos, len(imagenes), base["ig"], bool(wa))
-        draft_id = str(uuid.uuid4())[:8]
-        db.add(Draft(
+        score, tips = evaluar(datos, len(photos), base["ig"], bool(wa))
+        draft_id = uuid.uuid4().hex
+        draft = Draft(
             id=draft_id, telegram_id=tid, source_url=payload.source_url,
             title=datos["titulo"], price=datos["precio"],
-            images_json=json.dumps(imagenes), raw_desc="",
+            images_json="[]", raw_desc="",
             copy_ig=base["ig"], copy_fb=base["fb"],
             datos_json=json.dumps(datos, ensure_ascii=False),
             variantes_json=json.dumps(variantes, ensure_ascii=False),
-        ))
+        )
+        db.add(draft)
+        db.flush()
+        _guardar_fotos(db, draft, photos, meta)
         db.commit()
         dash = link_tablero(tid, asegurar_token(db, perfil)) if perfil else ""
         return {"draft_id": draft_id, "dash": dash, "ai_copy": base["fb"], "score": score, "tips": tips[:3],
-                "titulo": datos["titulo"], "n_fotos": len(imagenes)}
+                "titulo": datos["titulo"], "n_fotos": len(photos), "photo_warnings": meta["warnings"]}
     finally:
         db.close()
 
 
 @app.delete("/api/drafts/{draft_id}")
 def delete_draft(draft_id: str, telegram_id: int, k: str = ""):
-    db = SessionLocal()
-    try:
-        verificar(db, telegram_id, k)
-        db.query(Draft).filter_by(id=draft_id, telegram_id=str(telegram_id)).delete()
-        db.commit()
-        return {"ok": True}
-    finally:
-        db.close()
+    with _DRAFT_LOCKS[hash(draft_id) % len(_DRAFT_LOCKS)]:
+        with SessionLocal() as db:
+            verificar(db, telegram_id, k)
+            draft = db.query(Draft).filter_by(id=draft_id, telegram_id=str(telegram_id)).with_for_update().first()
+            if not draft:
+                raise HTTPException(404, "Borrador no encontrado")
+            if _json(draft.publish_pending_json, {}):
+                raise HTTPException(409, "La publicación espera confirmación. Revisá su resultado antes de descartar el aviso.")
+            db.query(DraftPhoto).filter_by(draft_id=draft_id).delete()
+            db.delete(draft)
+            db.commit()
+            return {"ok": True}
+
+
+@app.post("/api/drafts/{draft_id}/photos/refresh")
+def refresh_photos(draft_id: str, req: RefreshReq):
+    with _DRAFT_LOCKS[hash(draft_id) % len(_DRAFT_LOCKS)]:
+        with SessionLocal() as db:
+            verificar(db, req.telegram_id, req.k)
+            draft = db.query(Draft).filter_by(id=draft_id, telegram_id=str(req.telegram_id)).with_for_update().first()
+            if not draft:
+                raise HTTPException(404, "Borrador no encontrado")
+            if db.query(Publicacion).filter_by(draft_id=draft_id).first() or _json(draft.publish_pending_json, {}):
+                raise HTTPException(409, "Este aviso ya se publicó o espera confirmación. Enviá el enlace de nuevo para crear otro borrador.")
+            raw, photos, meta = _preparar_fotos(draft.source_url)
+            _guardar_fotos(db, draft, photos, meta)
+            db.commit()
+            return {"success": True, "n_fotos": len(photos), "photo_warnings": meta["warnings"]}
+
+
+@app.get("/media/{photo_id}.jpg")
+def media_photo(photo_id: str, version: str = "preview"):
+    if not re.fullmatch(r"[a-f0-9]{32}", photo_id) or version not in ("preview", "instagram"):
+        raise HTTPException(404, "Foto no encontrada")
+    with SessionLocal() as db:
+        column = DraftPhoto.instagram if version == "instagram" else DraftPhoto.jpeg
+        row = db.query(column).filter(DraftPhoto.id == photo_id).first()
+        if not row:
+            raise HTTPException(404, "Foto no encontrada")
+        return Response(bytes(row[0]), media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable",
+                                 "X-Content-Type-Options": "nosniff"})
 
 
 # --- PUBLISH ---
@@ -404,51 +494,65 @@ def _error_graph(resp: dict, defecto: str) -> str:
 
 @app.post("/api/publish")
 def publish(req: PublishReq):
+    with _DRAFT_LOCKS[hash(req.draft_id) % len(_DRAFT_LOCKS)]:
+        return _publish(req)
+
+
+def _publish(req: PublishReq):
     db = SessionLocal()
+    envio_realizado = False
     try:
         verificar(db, req.telegram_id, req.k)
         user = db.query(FbUser).filter_by(telegram_id=str(req.telegram_id)).first()
-        draft = db.query(Draft).filter_by(id=req.draft_id, telegram_id=str(req.telegram_id)).first()
+        draft = db.query(Draft).filter_by(id=req.draft_id, telegram_id=str(req.telegram_id)).with_for_update().first()
         if not draft:
             raise HTTPException(404, "Borrador no encontrado")
+        if req.destination not in ("fb_feed", "ig_feed"):
+            raise HTTPException(400, "Destino no soportado")
+        previous = db.query(Publicacion).filter_by(draft_id=draft.id, destino=req.destination).first()
+        if previous:
+            return {"success": True, "post_id": previous.post_id, "already_published": True}
+        if req.destination in _json(draft.publish_pending_json, {}):
+            raise HTTPException(409, "Meta no confirmó el intento anterior. Revisá la cuenta antes de repetir la publicación.")
+        meta = _json(draft.photos_meta_json, {})
+        if not meta.get("saved"):
+            raise HTTPException(409, "Tocá Completar fotos del enlace y revisá la galería antes de publicar.")
+        if meta.get("incomplete"):
+            raise HTTPException(409, "Faltan fotos por descargar. Actualizá las fotos antes de publicar.")
         if not user:
             raise HTTPException(400, "No conectaste Facebook. Usa el boton Conectar del Dashboard.")
         pages = _json(user.pages_json, [])
         if not pages:
             raise HTTPException(400, "No hay paginas conectadas.")
-        page = pages[0]
+        page = next((p for p in pages if str(p.get("id")) == req.page_id), None) if req.page_id else (pages[0] if len(pages) == 1 else None)
+        if not page:
+            raise HTTPException(400, "Elegí la página de Facebook en la que querés publicar.")
         page_id, page_token = page["id"], page["access_token"]
-        images = _json(draft.images_json, [])
+        photos = db.query(DraftPhoto).filter_by(draft_id=draft.id).order_by(DraftPhoto.position).all()
+        if not photos or len(photos) != meta.get("downloaded"):
+            raise HTTPException(409, "No están guardadas todas las fotos del aviso. Actualizá las fotos.")
         es_ig = req.destination.startswith("ig")
         copy_text = (req.texto or "").strip() or (draft.copy_ig if es_ig else draft.copy_fb)
 
-        if req.destination == "fb_feed":
-            if images:
-                media = requests.post(f"{GRAPH}/{page_id}/photos",
-                                      data={"url": images[0], "caption": copy_text, "access_token": page_token}).json()
-            else:
-                media = requests.post(f"{GRAPH}/{page_id}/feed",
-                                      data={"message": copy_text, "access_token": page_token}).json()
-            post_id = media.get("post_id") or media.get("id")
-        elif req.destination == "ig_feed":
-            if not images:
-                return {"success": False, "error": "Instagram necesita al menos una foto."}
-            ig_res = requests.get(f"{GRAPH}/{page_id}?fields=instagram_business_account&access_token={page_token}").json()
-            ig_id = (ig_res.get("instagram_business_account") or {}).get("id")
-            if not ig_id:
-                raise HTTPException(400, "La pagina no tiene Instagram Business vinculado")
-            cont = requests.post(f"{GRAPH}/{ig_id}/media",
-                                 data={"image_url": images[0], "caption": copy_text, "access_token": page_token}).json()
-            if not cont.get("id"):
-                return {"success": False, "error": _error_graph(cont, "No se pudo preparar la publicacion en Instagram")}
-            media = requests.post(f"{GRAPH}/{ig_id}/media_publish",
-                                  data={"creation_id": cont["id"], "access_token": page_token}).json()
-            post_id = media.get("id")
-        else:
-            return {"success": False, "error": "Destino no soportado"}
+        def marcar_envio():
+            nonlocal envio_realizado
+            pending = _json(draft.publish_pending_json, {})
+            pending[req.destination] = ahora().isoformat()
+            draft.publish_pending_json = json.dumps(pending)
+            db.commit()
+            envio_realizado = True
 
-        if not post_id:
-            return {"success": False, "error": _error_graph(media, "Meta no confirmo la publicacion")}
+        if req.destination == "fb_feed":
+            post_id = publicar_facebook(page_id, page_token, [p.jpeg for p in photos], copy_text, marcar_envio)
+        else:
+            try:
+                validar_url_publica(APP_URL)
+                if not APP_URL.startswith("https://"):
+                    raise ValueError
+            except ValueError as exc:
+                raise HTTPException(400, "Para Instagram falta configurar la dirección pública HTTPS del servidor.") from exc
+            urls = [f"{APP_URL}/media/{p.id}.jpg?version=instagram" for p in photos]
+            post_id = publicar_instagram(page_id, page_token, urls, copy_text, marcar_envio)
 
         ahora_ = ahora()
         db.add(Publicacion(draft_id=draft.id, telegram_id=draft.telegram_id, destino=req.destination,
@@ -456,12 +560,28 @@ def publish(req: PublishReq):
         draft.status = "publicado"
         draft.destination = req.destination
         draft.published_at = ahora_
+        if es_ig:
+            draft.copy_ig = copy_text
+        else:
+            draft.copy_fb = copy_text
+        pending = _json(draft.publish_pending_json, {})
+        pending.pop(req.destination, None)
+        draft.publish_pending_json = json.dumps(pending)
         db.commit()
         return {"success": True, "post_id": post_id}
     except HTTPException:
         raise
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except ResultadoIncierto as exc:
+        return {"success": False, "error": str(exc), "requires_review": True}
+    except ErrorPublicacion as exc:
+        pending = _json(draft.publish_pending_json, {})
+        pending.pop(req.destination, None)
+        draft.publish_pending_json = json.dumps(pending)
+        db.commit()
+        return {"success": False, "error": str(exc)}
+    except Exception:
+        return {"success": False, "error": "No se pudo completar la publicación. Revisá el estado de la cuenta antes de repetir.",
+                "requires_review": envio_realizado}
     finally:
         db.close()
 
@@ -578,12 +698,13 @@ def api_dashboard(tid: str, k: str = "", mes: Optional[str] = None):
                 "interacciones": sum(_interacciones(p) for p in del_mes),
                 "int_fb": sum(_interacciones(p) for p in fb), "int_ig": sum(_interacciones(p) for p in ig)}
 
-    k, k_prev = kpis(mes), kpis(mes_prev(mes))
+    indicadores, k_prev = kpis(mes), kpis(mes_prev(mes))
 
     # --- tarjetas de avisos ---
     lista = []
     for d in drafts:
         imgs = _json(d.images_json, [])
+        photo_meta = _json(d.photos_meta_json, {})
         datos = _json(d.datos_json, None) or extraer_datos({"title": d.title or "", "price": d.price or ""})
         variantes = _json(d.variantes_json, None) or generar_variantes(datos, nombre, wa)
         score, tips = evaluar(datos, len(imgs), d.copy_ig or "", bool(wa))
@@ -592,6 +713,10 @@ def api_dashboard(tid: str, k: str = "", mes: Optional[str] = None):
             "id": d.id, "title": d.title or "Propiedad", "price": d.price or "",
             "zona": datos.get("zona", ""), "tipo": datos.get("tipo", ""), "operacion": datos.get("operacion", ""),
             "img": imgs[0] if imgs else "", "n_fotos": len(imgs), "source_url": d.source_url or "",
+            "images": imgs, "photos_saved": bool(photo_meta.get("saved")),
+            "photos_incomplete": bool(photo_meta.get("incomplete")),
+            "photo_warnings": photo_meta.get("warnings", []),
+            "publish_pending": list(_json(d.publish_pending_json, {})),
             "estado": "publicado" if mis_pubs else "pendiente",
             "mes_creado": mes_key(d.created_at), "meses_pub": sorted({mes_key(p.published_at) for p in mis_pubs if p.published_at}),
             "creado": local(d.created_at).strftime("%d/%m/%Y %H:%M"),
@@ -633,9 +758,11 @@ def api_dashboard(tid: str, k: str = "", mes: Optional[str] = None):
 
     return {
         "perfil": {"nombre": nombre, "whatsapp": wa, "fb_conectado": bool(fb_user),
-                   "login_url": link_conectar(tid, k)},
+                   "login_url": link_conectar(tid, k),
+                   "pages": [{"id": str(p.get("id", "")), "name": p.get("name", "Página")}
+                             for p in (_json(fb_user.pages_json, []) if fb_user else [])]},
         "mes": mes, "mes_label": mes_label(mes), "mes_actual": actual, "meses": meses,
-        "kpis": {**k, "pendientes": pendientes, "prev": k_prev},
+        "kpis": {**indicadores, "pendientes": pendientes, "prev": k_prev},
         "semanal": semanal, "historico": historico, "top": top, "avisos": lista,
         "metricas_actualizadas": local(max(ult)).strftime("%d/%m %H:%M") if ult else "",
     }
