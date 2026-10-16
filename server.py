@@ -354,9 +354,24 @@ def _pagina(titulo, texto, cerrar=False):
 def _graph_get(path, **params):
     try:
         r = requests.get(f"{GRAPH}/{path}", params=params, timeout=15).json()
-    except (requests.RequestException, ValueError):
-        return {}
+    except (requests.RequestException, ValueError) as exc:
+        return {"error": {"message": f"Sin respuesta de Meta ({type(exc).__name__})"}}
     return r if isinstance(r, dict) else {}
+
+
+def _motivo_meta(r):
+    """Texto del error que devuelve Meta (nunca incluye claves), para mostrarlo y dejarlo en los registros."""
+    err = r.get("error") if isinstance(r, dict) else None
+    if not isinstance(err, dict):
+        return ""
+    codigo = f" (código {err['code']})" if err.get("code") else ""
+    return f"{err.get('message') or 'Sin detalle'}{codigo}"[:300]
+
+
+def _fallo_conexion(paso, respuesta, texto):
+    motivo = _motivo_meta(respuesta)
+    print(f"[auth/callback] {paso}: {motivo or 'sin detalle'}", flush=True)
+    return _pagina("No se pudo conectar", f"{texto} Meta respondió: {motivo}" if motivo else texto)
 
 
 def _revisar_token(token):
@@ -400,23 +415,24 @@ def estado_meta(u):
 
 
 @app.get("/auth/callback")
-def fb_callback(state: str = "", code: str = "", error: str = ""):
+def fb_callback(state: str = "", code: str = "", error: str = "", error_description: str = ""):
     telegram_id = state_valido(state)
     if not telegram_id:
         return _pagina("Enlace no válido", "Volvé a tocar Conectar FB + IG desde el tablero o escribile /conectar al bot.")
     if error or not code:
-        return _pagina("No se completó la conexión", "Meta no recibió la autorización. Volvé a tocar Conectar FB + IG y aceptá todos los permisos.")
+        detalle = f" Meta respondió: {error_description[:300]}" if error_description else ""
+        return _pagina("No se completó la conexión", "Meta no recibió la autorización. Volvé a tocar Conectar FB + IG y aceptá todos los permisos." + detalle)
     tok = _graph_get("oauth/access_token", client_id=FB_APP_ID, client_secret=FB_SECRET,
                      redirect_uri=f"{APP_URL}/auth/callback", code=code)
     corto = tok.get("access_token")
     if not corto:
-        return _pagina("No se pudo conectar", "Meta rechazó la autorización. Volvé a intentarlo en unos minutos.")
+        return _fallo_conexion("canje del código", tok, "Meta rechazó la autorización.")
     # El token del codigo dura ~1 hora; el de 60 dias produce tokens de Pagina sin vencimiento por tiempo.
     largo = _graph_get("oauth/access_token", grant_type="fb_exchange_token", client_id=FB_APP_ID,
                        client_secret=FB_SECRET, fb_exchange_token=corto)
     access_token = largo.get("access_token")
     if not access_token:
-        return _pagina("No se pudo conectar", "Meta no entregó un acceso duradero. Volvé a intentarlo en unos minutos.")
+        return _fallo_conexion("acceso de 60 días", largo, "Meta no entregó un acceso duradero.")
     pages = _graph_get("me/accounts", access_token=access_token, limit=100,
                        fields="id,name,access_token,instagram_business_account{id,username}").get("data") or []
     pages = [p for p in pages if isinstance(p, dict) and p.get("id") and p.get("access_token")]

@@ -109,3 +109,14 @@ def test_expired_connection_blocks_publication_without_calling_meta(client, monk
                                                  'draft_id': 'd1', 'destination': 'fb_feed'})
     assert response.status_code == 400 and 'venció' in response.json()['detail']
     assert dashboard(client)['fb_estado'] == 'vencido'
+
+
+def test_callback_shows_meta_reason_when_code_exchange_fails(client, monkeypatch, capsys):
+    monkeypatch.setattr(server, 'FB_APP_ID', 'app-id')
+    monkeypatch.setattr(server, 'FB_SECRET', 'app-secret')
+    monkeypatch.setattr(server.requests, 'get', lambda url, params=None, timeout=None: Respuesta(
+        {'error': {'message': 'Error validating client secret.', 'type': 'OAuthException', 'code': 1}}))
+    response = client.get('/auth/callback', params={'code': 'abc', 'state': firmar_state('123', 'n1')})
+    assert 'Error validating client secret. (código 1)' in response.text
+    assert 'app-secret' not in response.text
+    assert 'canje del código: Error validating client secret.' in capsys.readouterr().out
