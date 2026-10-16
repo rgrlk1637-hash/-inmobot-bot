@@ -136,3 +136,16 @@ def test_meta_health_checks_app_credentials_without_showing_them(client, monkeyp
     assert error.json() == {'meta': 'error', 'motivo': 'Invalid OAuth access token signature. (código 190)'}
     assert 'app-secret' not in error.text
     server._SALUD_META.update(t=0.0, r=None)
+
+
+def test_meta_credentials_ignore_pasted_spaces_and_quotes(monkeypatch):
+    import importlib
+    monkeypatch.setenv('FACEBOOK_APP_ID', ' 2094870691137790\n')
+    monkeypatch.setenv('FACEBOOK_APP_SECRET', '"abc123"\n')
+    try:
+        importlib.reload(server)
+        assert server.FB_APP_ID == '2094870691137790' and server.FB_SECRET == 'abc123'
+    finally:
+        monkeypatch.delenv('FACEBOOK_APP_ID')
+        monkeypatch.delenv('FACEBOOK_APP_SECRET')
+        importlib.reload(server)
