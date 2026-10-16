@@ -414,6 +414,22 @@ def estado_meta(u):
     return ("vencido" if _vencido(vence) else "conectado"), vence
 
 
+_SALUD_META = {"t": 0.0, "r": None}
+
+
+@app.get("/salud/meta")
+def salud_meta():
+    """Comprueba con Meta que FACEBOOK_APP_ID y FACEBOOK_APP_SECRET forman un par válido. No muestra claves."""
+    if not FB_APP_ID or FB_APP_ID == "placeholder" or not FB_SECRET:
+        return {"meta": "sin_configurar"}
+    if _SALUD_META["r"] is None or time.monotonic() - _SALUD_META["t"] > 60:
+        r = _graph_get(FB_APP_ID, fields="id", access_token=f"{FB_APP_ID}|{FB_SECRET}")
+        ok = str(r.get("id", "")) == str(FB_APP_ID)
+        _SALUD_META.update(t=time.monotonic(), r={"meta": "ok"} if ok else
+                           {"meta": "error", "motivo": _motivo_meta(r) or "Respuesta inesperada de Meta"})
+    return _SALUD_META["r"]
+
+
 @app.get("/auth/callback")
 def fb_callback(state: str = "", code: str = "", error: str = "", error_description: str = ""):
     telegram_id = state_valido(state)
