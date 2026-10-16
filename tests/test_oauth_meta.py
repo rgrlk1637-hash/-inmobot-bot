@@ -109,3 +109,30 @@ def test_expired_connection_blocks_publication_without_calling_meta(client, monk
                                                  'draft_id': 'd1', 'destination': 'fb_feed'})
     assert response.status_code == 400 and 'venció' in response.json()['detail']
     assert dashboard(client)['fb_estado'] == 'vencido'
+
+
+def test_callback_shows_meta_reason_when_code_exchange_fails(client, monkeypatch, capsys):
+    monkeypatch.setattr(server, 'FB_APP_ID', 'app-id')
+    monkeypatch.setattr(server, 'FB_SECRET', 'app-secret')
+    monkeypatch.setattr(server.requests, 'get', lambda url, params=None, timeout=None: Respuesta(
+        {'error': {'message': 'Error validating client secret.', 'type': 'OAuthException', 'code': 1}}))
+    response = client.get('/auth/callback', params={'code': 'abc', 'state': firmar_state('123', 'n1')})
+    assert 'Error validating client secret. (código 1)' in response.text
+    assert 'app-secret' not in response.text
+    assert 'canje del código: Error validating client secret.' in capsys.readouterr().out
+
+
+def test_meta_health_checks_app_credentials_without_showing_them(client, monkeypatch):
+    server._SALUD_META.update(t=0.0, r=None)
+    assert client.get('/salud/meta').json() == {'meta': 'sin_configurar'}
+    monkeypatch.setattr(server, 'FB_APP_ID', 'app-id')
+    monkeypatch.setattr(server, 'FB_SECRET', 'app-secret')
+    respuestas = iter([{'id': 'app-id'},
+                       {'error': {'message': 'Invalid OAuth access token signature.', 'code': 190}}])
+    monkeypatch.setattr(server.requests, 'get', lambda url, params=None, timeout=None: Respuesta(next(respuestas)))
+    assert client.get('/salud/meta').json() == {'meta': 'ok'}
+    server._SALUD_META.update(t=0.0, r=None)
+    error = client.get('/salud/meta')
+    assert error.json() == {'meta': 'error', 'motivo': 'Invalid OAuth access token signature. (código 190)'}
+    assert 'app-secret' not in error.text
+    server._SALUD_META.update(t=0.0, r=None)
