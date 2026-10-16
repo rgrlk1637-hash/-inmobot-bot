@@ -1,6 +1,7 @@
-import os, json, uuid, re, time, threading, calendar, secrets, hmac
+import os, json, uuid, re, time, threading, calendar, secrets, hmac, html
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, Response, JSONResponse
@@ -58,6 +59,7 @@ class FbUser(Base):
     telegram_id = Column(String, primary_key=True)
     access_token = Column(Text)
     pages_json = Column(Text, default="[]")
+    vence_at = Column(DateTime, nullable=True)    # cuando Meta deja de aceptar los permisos (reconectar antes)
 
 
 class Draft(Base):
@@ -336,26 +338,92 @@ def fb_login(telegram_id: str, k: str = ""):
     if not FB_APP_ID or FB_APP_ID == "placeholder":
         return HTMLResponse("<html><body style='font-family:sans-serif;padding:40px'><h2>App de Meta no configurada aun.</h2></body></html>")
     scopes = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,business_management"
-    redirect_uri = f"{APP_URL}/auth/callback"
     state = firmar_state(telegram_id, uuid.uuid4().hex[:12])
-    url = f"https://www.facebook.com/{GRAPH_VERSION}/dialog/oauth?client_id={FB_APP_ID}&redirect_uri={redirect_uri}&scope={scopes}&state={state}&response_type=code"
-    return RedirectResponse(url)
+    query = urlencode({"client_id": FB_APP_ID, "redirect_uri": f"{APP_URL}/auth/callback",
+                       "scope": scopes, "state": state, "response_type": "code"})
+    return RedirectResponse(f"https://www.facebook.com/{GRAPH_VERSION}/dialog/oauth?{query}")
+
+
+def _pagina(titulo, texto, cerrar=False):
+    script = "<script>setTimeout(()=>window.close(),2500)</script>" if cerrar else ""
+    return HTMLResponse("<html><head><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+                        "<body style='font-family:sans-serif;text-align:center;padding:40px 16px'>"
+                        f"<h2>{html.escape(titulo)}</h2><p>{html.escape(texto)}</p>{script}</body></html>")
+
+
+def _graph_get(path, **params):
+    try:
+        r = requests.get(f"{GRAPH}/{path}", params=params, timeout=15).json()
+    except (requests.RequestException, ValueError):
+        return {}
+    return r if isinstance(r, dict) else {}
+
+
+def _revisar_token(token):
+    """Pregunta a Meta si el token sigue vigente: {"valido", "vence"} o None si no se pudo comprobar."""
+    if not token or not FB_APP_ID or FB_APP_ID == "placeholder" or not FB_SECRET:
+        return None
+    data = _graph_get("debug_token", input_token=token, access_token=f"{FB_APP_ID}|{FB_SECRET}").get("data")
+    if not isinstance(data, dict) or "is_valid" not in data:
+        return None
+    # expires_at = 0 significa "sin vencimiento"; data_access_expires_at es el limite de 90 dias de Meta.
+    plazos = [v for v in (data.get("expires_at"), data.get("data_access_expires_at")) if isinstance(v, int) and v > 0]
+    vence = datetime.fromtimestamp(min(plazos), timezone.utc) if plazos else None
+    return {"valido": bool(data["is_valid"]), "vence": vence}
+
+
+_ESTADO_META = {}   # telegram_id -> (momento de la consulta, resultado de _revisar_token)
+_ESTADO_META_TTL = 1800
+
+
+def _vencido(vence):
+    return vence is not None and local(vence) <= local(ahora())
+
+
+def estado_meta(u):
+    """'sin_conectar', 'vencido' o 'conectado', y la fecha en que vence (si se conoce)."""
+    pages = _json(u.pages_json, []) if u else []
+    if not pages:
+        return "sin_conectar", None
+    vence = u.vence_at
+    cache = _ESTADO_META.get(u.telegram_id)
+    if not cache or time.monotonic() - cache[0] > _ESTADO_META_TTL:
+        cache = (time.monotonic(), _revisar_token(pages[0].get("access_token")))
+        _ESTADO_META[u.telegram_id] = cache
+    revision = cache[1]
+    if revision:
+        vence = revision["vence"] or vence
+        if not revision["valido"]:
+            return "vencido", vence
+    # Si Meta no respondio, se confia en la fecha guardada al conectar.
+    return ("vencido" if _vencido(vence) else "conectado"), vence
 
 
 @app.get("/auth/callback")
-def fb_callback(code: str, state: str):
+def fb_callback(state: str = "", code: str = "", error: str = ""):
     telegram_id = state_valido(state)
     if not telegram_id:
-        raise HTTPException(400, "Solicitud invalida. Volve a intentar desde el bot con /conectar.")
-    redirect_uri = f"{APP_URL}/auth/callback"
-    tok = requests.get(
-        f"{GRAPH}/oauth/access_token"
-        f"?client_id={FB_APP_ID}&redirect_uri={redirect_uri}&client_secret={FB_SECRET}&code={code}"
-    ).json()
-    access_token = tok.get("access_token")
+        return _pagina("Enlace no válido", "Volvé a tocar Conectar FB + IG desde el tablero o escribile /conectar al bot.")
+    if error or not code:
+        return _pagina("No se completó la conexión", "Meta no recibió la autorización. Volvé a tocar Conectar FB + IG y aceptá todos los permisos.")
+    tok = _graph_get("oauth/access_token", client_id=FB_APP_ID, client_secret=FB_SECRET,
+                     redirect_uri=f"{APP_URL}/auth/callback", code=code)
+    corto = tok.get("access_token")
+    if not corto:
+        return _pagina("No se pudo conectar", "Meta rechazó la autorización. Volvé a intentarlo en unos minutos.")
+    # El token del codigo dura ~1 hora; el de 60 dias produce tokens de Pagina sin vencimiento por tiempo.
+    largo = _graph_get("oauth/access_token", grant_type="fb_exchange_token", client_id=FB_APP_ID,
+                       client_secret=FB_SECRET, fb_exchange_token=corto)
+    access_token = largo.get("access_token")
     if not access_token:
-        raise HTTPException(400, f"Error: {tok}")
-    pages = requests.get(f"{GRAPH}/me/accounts?access_token={access_token}").json().get("data", [])
+        return _pagina("No se pudo conectar", "Meta no entregó un acceso duradero. Volvé a intentarlo en unos minutos.")
+    pages = _graph_get("me/accounts", access_token=access_token, limit=100,
+                       fields="id,name,access_token,instagram_business_account{id,username}").get("data") or []
+    pages = [p for p in pages if isinstance(p, dict) and p.get("id") and p.get("access_token")]
+    revision = _revisar_token(pages[0]["access_token"]) if pages else None
+    vence = revision["vence"] if revision else None
+    if not vence and isinstance(largo.get("expires_in"), int):
+        vence = ahora() + timedelta(seconds=largo["expires_in"])
     db = SessionLocal()
     try:
         u = db.query(FbUser).filter_by(telegram_id=telegram_id).first()
@@ -363,11 +431,16 @@ def fb_callback(code: str, state: str):
             u = FbUser(telegram_id=telegram_id)
         u.access_token = access_token
         u.pages_json = json.dumps(pages)
+        u.vence_at = vence
         db.add(u)
         db.commit()
     finally:
         db.close()
-    return HTMLResponse(f"<html><body style='font-family:sans-serif;text-align:center;padding:60px'><h2>Conectado</h2><p>{len(pages)} pagina(s) vinculadas. Podes cerrar esta ventana.</p><script>setTimeout(()=>window.close(),2000)</script></body></html>")
+    _ESTADO_META[telegram_id] = (time.monotonic(), revision)
+    if not pages:
+        return _pagina("Falta elegir la Página", "Meta no compartió ninguna Página. Volvé a conectar y marcá la Página y su Instagram.")
+    nombres = ", ".join(p.get("name") or "Página" for p in pages)
+    return _pagina("Conectado", f"Páginas vinculadas: {nombres}. Podés cerrar esta ventana.", cerrar=True)
 
 
 # --- DRAFTS ---
@@ -524,6 +597,8 @@ def _publish(req: PublishReq):
         pages = _json(user.pages_json, [])
         if not pages:
             raise HTTPException(400, "No hay paginas conectadas.")
+        if _vencido(user.vence_at):
+            raise HTTPException(400, "La conexión con Facebook venció. Tocá Reconectar FB + IG en el tablero.")
         page = next((p for p in pages if str(p.get("id")) == req.page_id), None) if req.page_id else (pages[0] if len(pages) == 1 else None)
         if not page:
             raise HTTPException(400, "Elegí la página de Facebook en la que querés publicar.")
@@ -756,8 +831,10 @@ def api_dashboard(tid: str, k: str = "", mes: Optional[str] = None):
     meses = sorted({x["mes_creado"] for x in lista} | {p["mes"] for x in lista for p in x["pubs"] if p["mes"]} | {actual}, reverse=True)
     ult = [p.metrics_at for p in pubs if p.metrics_at]
 
+    fb_estado, fb_vence = estado_meta(fb_user)
     return {
-        "perfil": {"nombre": nombre, "whatsapp": wa, "fb_conectado": bool(fb_user),
+        "perfil": {"nombre": nombre, "whatsapp": wa, "fb_conectado": fb_estado == "conectado",
+                   "fb_estado": fb_estado, "fb_vence": local(fb_vence).strftime("%d/%m/%Y") if fb_vence else "",
                    "login_url": link_conectar(tid, k),
                    "pages": [{"id": str(p.get("id", "")), "name": p.get("name", "Página")}
                              for p in (_json(fb_user.pages_json, []) if fb_user else [])]},
@@ -811,6 +888,24 @@ def manifest(tid: str = "", k: str = ""):
         "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}],
     }, media_type="application/manifest+json")
+
+
+@app.get("/privacidad")
+def privacidad():
+    """Meta exige una politica de privacidad y de eliminacion de datos para pasar la app a modo publico."""
+    return HTMLResponse("""<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>InmoBot · Privacidad</title></head><body style='font-family:sans-serif;max-width:680px;margin:auto;padding:32px 16px;line-height:1.5'>
+<h1>Privacidad de InmoBot</h1>
+<p>InmoBot ayuda a asesores inmobiliarios a preparar y publicar avisos en sus propias Páginas de Facebook y cuentas de Instagram.</p>
+<h2>Qué datos guardamos</h2>
+<ul><li>Del asesor: identificador de Telegram, nombre y WhatsApp que él mismo carga.</li>
+<li>De cada aviso: el enlace de la propiedad, sus fotos y los textos generados.</li>
+<li>De Meta: la lista de Páginas autorizadas y los permisos de acceso para publicar en ellas. No guardamos contraseñas.</li></ul>
+<h2>Para qué los usamos</h2>
+<p>Solo para preparar los avisos, publicarlos cuando el asesor lo confirma y mostrarle sus resultados. No vendemos ni compartimos datos con terceros.</p>
+<h2 id='eliminar'>Cómo eliminar tus datos</h2>
+<p>Quitá InmoBot en Facebook, en Configuración y privacidad › Configuración › Integraciones comerciales, y escribile al bot de Telegram pidiendo la baja: borramos tu perfil, tus avisos y tus permisos de Meta.</p>
+</body></html>""")
 
 
 @app.get("/")

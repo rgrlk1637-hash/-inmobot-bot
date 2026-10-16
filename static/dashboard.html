@@ -205,7 +205,7 @@ function cargar(mes){
 function pintar(){
   var d=S.data,p=d.perfil;
   $("agente").textContent=p.nombre?(p.nombre+(p.whatsapp?" · "+p.whatsapp:"")):"Falta tu WhatsApp: escribile /start al bot";
-  $("fbstat").innerHTML=p.fb_conectado?'<span class="pill ok">FB conectado</span>':'<a class="pill go" href="'+esc(p.login_url)+'">Conectar FB + IG</a>';
+  $("fbstat").innerHTML=p.fb_conectado?'<span class="pill ok"'+(p.fb_vence?' title="Reconectar antes del '+esc(p.fb_vence)+'"':'')+'>FB conectado</span>':'<a class="pill go" href="'+esc(p.login_url)+'">'+(p.fb_estado==="vencido"?"Reconectar FB + IG":"Conectar FB + IG")+'</a>';
   // mes
   var sel=$("mesSel");sel.innerHTML=d.meses.map(function(m){return '<option value="'+m+'"'+(m===d.mes?" selected":"")+'>'+esc(etiquetaMes(m))+'</option>'}).join("");
   var i=d.meses.indexOf(d.mes);$("next").disabled=i<=0;$("prev").disabled=i>=d.meses.length-1;
