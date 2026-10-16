@@ -18,8 +18,9 @@ from publicador import GRAPH, GRAPH_VERSION, publicar_facebook, publicar_instagr
 
 load_dotenv()
 APP_URL = os.getenv("APP_URL", "http://localhost:8000").rstrip("/")
-FB_APP_ID = os.getenv("FACEBOOK_APP_ID")
-FB_SECRET = os.getenv("FACEBOOK_APP_SECRET")
+# Railway conserva espacios, saltos de linea o comillas pegados junto con el valor; Meta los rechaza.
+FB_APP_ID = (os.getenv("FACEBOOK_APP_ID") or "").strip().strip("'\"").strip() or None
+FB_SECRET = (os.getenv("FACEBOOK_APP_SECRET") or "").strip().strip("'\"").strip() or None
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 # Si se define, solo estos Telegram IDs pueden registrarse (separados por coma). Vacio = abierto.
 ALLOWED_IDS = {x.strip() for x in os.getenv("ALLOWED_IDS", "").split(",") if x.strip()}
